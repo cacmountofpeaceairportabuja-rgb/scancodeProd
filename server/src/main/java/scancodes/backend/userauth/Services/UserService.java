@@ -33,7 +33,7 @@ public class UserService {
     user.setUsername(username);
     user.setEmail(normalizedEmail);
     user.setPasswordHash(passwordEncoder.encode(rawPassword));
-    user.setEnabled(true); // enable user immediately so JSON login works without email verification step
+    user.setEnabled(false);
     user.getRoles().add("USER");
 
     return userRepository.save(user);

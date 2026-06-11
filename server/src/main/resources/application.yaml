@@ -14,13 +14,6 @@ spring:
     compose:
       enabled: ${SPRING_DOCKER_COMPOSE_ENABLED:false}
 
-  security:
-    debug: true
-
 app:
   auth:
     public-base-url: ${APP_AUTH_PUBLIC_BASE_URL:http://localhost:8080}
-
-logging:
-  level:
-    org.springframework.security: DEBUG
