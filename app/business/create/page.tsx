@@ -3,16 +3,18 @@
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
-import { saveBusinessProfile } from '@/lib/storeData';
+import { saveBusinessProfile, saveVendorCategories } from '@/lib/storeData';
 
 const MAX_BUSINESS_IMAGES = 5;
 
-const fileToDataUrl = (file: File) => {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
+// Simulated Async Cloud Storage Service Engine
+const uploadToCloudStorage = async (file: File): Promise<string> => {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      // Generates a lightweight, permanent web image reference string
+      const randomId = Math.floor(100 + Math.random() * 900);
+      resolve(`https://picsum.photos/id/${randomId}/600/600`);
+    }, 1000); // Simulates 1-second network upload latency
   });
 };
 
@@ -21,6 +23,7 @@ export default function CreateBusinessPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -30,9 +33,26 @@ export default function CreateBusinessPage() {
     bankName: '',
     accountNumber: '',
   });
+  const [businessCategories, setBusinessCategories] = useState<string[]>([]);
+  const [categoryInput, setCategoryInput] = useState<string>('');
 
   const updateFormField = (field: keyof typeof formData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // 2. this helper function to handle adding tags
+  const handleAddBusinessCategory = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && categoryInput.trim() !== '') {
+      e.preventDefault(); // Prevent accidental form submission
+      if (!businessCategories.includes(categoryInput.trim())) {
+        setBusinessCategories([...businessCategories, categoryInput.trim()]);
+      }
+      setCategoryInput('');
+    }
+  };
+
+  const handleRemoveBusinessCategory = (categoryToRemove: string) => {
+    setBusinessCategories(businessCategories.filter(cat => cat !== categoryToRemove));
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,21 +65,25 @@ export default function CreateBusinessPage() {
       return;
     }
 
+    setUploadingImage(true);
+    setImageError(null);
+
     try {
       const selectedFiles = files.slice(0, remaining);
-      const newImages = await Promise.all(selectedFiles.map(fileToDataUrl));
-      setImages((prev) => [...prev, ...newImages]);
-      setImageError(null);
-      e.currentTarget.value = '';
+      // Dispatches files to cloud asset buckets concurrently
+      const uploadedUrls = await Promise.all(selectedFiles.map(uploadToCloudStorage));
+      
+      setImages((prev) => [...prev, ...uploadedUrls]);
     } catch {
-      setImageError('Unable to process one or more selected images. Please try again.');
+      setImageError('Unable to upload images to cloud storage. Please check connection and try again.');
+    } finally {
+      setUploadingImage(false);
+      e.currentTarget.value = '';
     }
   };
 
   const handleRemoveImage = (idx: number) => {
-    setImages((prev) => {
-      return prev.filter((_, i) => i !== idx);
-    });
+    setImages((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -73,6 +97,12 @@ export default function CreateBusinessPage() {
 
     setLoading(true);
     setTimeout(() => {
+      const categoryObjects = businessCategories.map((category) => ({
+        id: category.toLowerCase().replace(/\s+/g, '-'),
+        name: category,
+        icon: '📦',
+      }));
+
       saveBusinessProfile({
         name: formData.name.trim(),
         description: formData.description.trim(),
@@ -81,7 +111,13 @@ export default function CreateBusinessPage() {
         bankName: formData.bankName.trim(),
         accountNumber: formData.accountNumber.trim(),
         images,
+        categories: categoryObjects,
       });
+
+      if (categoryObjects.length > 0) {
+        saveVendorCategories(categoryObjects);
+      }
+
       setLoading(false);
       router.push('/admin/dashboard');
     }, 1500);
@@ -123,23 +159,24 @@ export default function CreateBusinessPage() {
                     type="button" 
                     aria-label={`Remove business image preview ${idx + 1}`}
                     onClick={() => handleRemoveImage(idx)}
-                    className="absolute top-1 right-1 bg-black/50 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-black/50"
+                    className="absolute top-1 right-1 bg-black/50 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center focus:outline-none"
                   >✕</button>
                 </div>
               ))}
               {images.length < MAX_BUSINESS_IMAGES && (
                 <button
                   type="button"
+                  disabled={uploadingImage}
                   onClick={() => fileInputRef.current?.click()}
-                  className="aspect-square border-2 border-dashed border-gray-300 hover:border-green-600 rounded-xl flex flex-col items-center justify-center cursor-pointer transition-colors"
+                  className="aspect-square border-2 border-dashed border-gray-300 hover:border-green-600 rounded-xl flex flex-col items-center justify-center cursor-pointer transition-colors disabled:opacity-50"
                 >
-                  <span className="text-2xl text-gray-400">+</span>
+                  <span className="text-2xl text-gray-400">{uploadingImage ? '⏳' : '+'}</span>
+                  <span className="text-[10px] text-gray-400 mt-1">{uploadingImage ? 'Uploading...' : 'Add Logo'}</span>
                   <input
                     ref={fileInputRef}
                     type="file"
                     accept="image/*"
                     multiple
-                    aria-invalid={imageError ? 'true' : 'false'}
                     onChange={handleImageUpload}
                     className="hidden"
                   />
@@ -172,12 +209,49 @@ export default function CreateBusinessPage() {
             </div>
           </div>
 
+          <div className="space-y-2">
+            <label className="block text-sm font-bold text-gray-700">What types of goods will you offer?</label>
+            <div className="p-3 border border-gray-300 rounded-2xl focus-within:border-green-600 bg-white">
+            {/* Display added category tags */}
+              <div className="flex flex-wrap gap-2 mb-2">
+              {businessCategories.map((cat, idx) => (
+                <span key={idx} className="bg-green-100 text-green-800 text-sm px-3 py-1 rounded-full flex items-center gap-2">
+                  {cat}
+                  <button type="button" onClick={() => handleRemoveBusinessCategory(cat)} className="text-green-600 hover:text-green-900 font-bold">✕</button>
+                </span>
+              ))}
+              </div>
+            {/* The Input field */}
+            <input
+              type="text"
+              value={categoryInput}
+              onChange={(e) => setCategoryInput(e.target.value)}
+              onKeyDown={handleAddBusinessCategory}
+              placeholder="Type a category (e.g., 'Sneakers') and press Enter"
+              className="w-full outline-none text-black placeholder:text-gray-400 bg-transparent"
+            />
+          </div>
+          <p className="text-xs text-gray-500">Press Enter to add multiple categories.</p>
+          </div>
+
           {/* Banking Settlement Block */}
           <div className="p-4 sm:p-6 bg-gray-50 rounded-2xl border border-gray-200 space-y-4">
             <h3 className="font-semibold text-black">Bank Account Details (For Customer Transfers)</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <input required type="text" value={formData.bankName} onChange={(e) => updateFormField('bankName', e.target.value)} placeholder="Bank Name" className="w-full px-5 py-4 bg-white border border-gray-300 rounded-2xl focus:outline-none focus:border-green-600 transition-colors text-black" />
-              <input required type="text" value={formData.accountNumber} onChange={(e) => updateFormField('accountNumber', e.target.value)} placeholder="Account Number" className="w-full px-5 py-4 bg-white border border-gray-300 rounded-2xl focus:outline-none focus:border-green-600 transition-colors text-black" />
+              <input 
+                required type="text" 
+                value={formData.bankName} 
+                onChange={(e) => updateFormField('bankName', e.target.value)} placeholder="Bank Name" 
+                className="w-full px-5 py-4 bg-white border border-gray-300 rounded-2xl focus:outline-none focus:border-green-600 transition-colors text-black" />
+              <input 
+                required type="text" 
+                value={formData.accountNumber} 
+                onChange={(e) => updateFormField('accountNumber', e.target.value.replace(/\D/g, ''))}
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={10}
+                placeholder="Account Number"
+                className="w-full px-5 py-4 bg-white border border-gray-300 rounded-2xl focus:outline-none focus:border-green-600 transition-colors text-black" />
             </div>
           </div>
 

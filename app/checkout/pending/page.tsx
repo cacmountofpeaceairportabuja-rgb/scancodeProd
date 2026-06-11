@@ -1,147 +1,205 @@
 'use client';
 
-import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckoutOrder, getCheckoutOrder, saveCheckoutOrder } from '@/lib/storeData';
+import { useEffect, useState } from 'react';
+import { getCheckoutOrder, saveCheckoutOrder, CheckoutOrder } from '@/lib/storeData';
 
-export default function CheckoutPendingRoom() {
+export default function CheckoutPendingPage() {
   const router = useRouter();
-  const [isConfirmed, setIsConfirmed] = useState(false);
-  const [userChecked, setUserChecked] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [notifying, setNotifying] = useState(false);
-  const [order, setOrder] = useState<CheckoutOrder | null>(() => getCheckoutOrder());
+  const [order, setOrder] = useState<CheckoutOrder | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  const handleNotifyMerchant = (e: React.FormEvent) => {
-    e.preventDefault();
-    setFeedback(null);
+  // Sync and monitor live transaction status updates from the admin pane
+  useEffect(() => {
+    setOrder(getCheckoutOrder());
 
-    // Checkbox State Validation
-    if (!userChecked) {
-      setFeedback('You must confirm that you have initiated the manual bank transfer request before updating status flags.');
-      return;
-    }
-
-    setNotifying(true);
-
-    // Simulate database update callback validation
-    setTimeout(() => {
-      setNotifying(false);
-      setIsConfirmed(true);
-      if (order) {
-        const updatedOrder: CheckoutOrder = { ...order, status: 'customer_notified' };
-        setOrder(updatedOrder);
-        saveCheckoutOrder(updatedOrder);
+    const handleStorageSync = (e: StorageEvent) => {
+      // Re-hydrate order tracking data when mutations hit local storage pools
+      if (e.key === 'scancode.checkoutOrder' && e.newValue) {
+        try {
+          setOrder(JSON.parse(e.newValue) as CheckoutOrder);
+        } catch (err) {
+          console.error("Failed to parse incoming checkout sync state", err);
+        }
       }
-    }, 2000);
+    };
+
+    window.addEventListener('storage', handleStorageSync);
+    return () => window.removeEventListener('storage', handleStorageSync);
+  }, []);
+
+  const handleCopyAccount = async () => {
+    if (!order?.accountNumber) return;
+    try {
+      await navigator.clipboard.writeText(order.accountNumber);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy account number data', err);
+    }
+  };
+
+  const handleIHavePaid = () => {
+    if (!order) return;
+    
+    const updatedOrder: CheckoutOrder = {
+      ...order,
+      status: 'customer_notified',
+    };
+
+    setOrder(updatedOrder);
+    saveCheckoutOrder(updatedOrder);
   };
 
   if (!order) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-6 text-black">
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-lg p-8 text-center space-y-4">
-          <h1 className="text-2xl font-semibold">No Pending Checkout</h1>
-          <p className="text-sm text-gray-500">Start from the store page so your order details can be prepared.</p>
-          <button
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-lg p-6 max-w-sm w-full text-center space-y-4">
+          <p className="text-gray-500 text-sm">No active session invoice found.</p>
+          <button 
             type="button"
-            onClick={() => router.push('/store/newBusiness')}
-            className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-4 rounded-2xl transition-colors"
+            onClick={() => router.push('/')}
+            className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3 rounded-xl transition-colors text-sm"
           >
-            Go to Store
+            Return to Storefront
           </button>
         </div>
       </div>
     );
   }
 
+  // Dynamic milestone generation state mapping
+  const currentStatus = order.status;
+  const isPaidConfirmed = currentStatus === 'confirmed';
+  const isNotified = currentStatus === 'customer_notified' || isPaidConfirmed;
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-6 text-black">
-      <div className="max-w-md w-full bg-white rounded-3xl shadow-lg p-10 text-center space-y-6">
+    <div className="min-h-screen bg-gray-50 text-black flex flex-col items-center justify-start py-6 sm:py-12 px-4 sm:px-6">
+      <div className="max-w-xl w-full space-y-6">
         
-        {!isConfirmed ? (
-          <>
-            {/* WAITING LOCK STATE */}
-            <div className="mx-auto w-16 h-16 border-4 border-gray-200 border-t-green-600 rounded-full animate-spin"></div>
-            <div>
-              <h1 className="text-2xl font-semibold">Pending Payment Verification</h1>
-              <p className="text-gray-500 text-sm mt-2">Please perform your manual settlement to the bank account listed below</p>
+        {/* Progress Tracker Widget Block */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-gray-200 p-5 sm:p-6 space-y-6">
+          <div className="text-center">
+            <h1 className="text-xl sm:text-2xl font-bold">Secure Checkout Invoice</h1>
+            <p className="text-xs text-gray-500 mt-1">Order Ref: {order.id}</p>
+          </div>
+
+          {/* Stepper Node Tree Line */}
+          <div className="relative flex justify-between items-center max-w-xs mx-auto pt-2">
+            {/* Background connecting bar tracking */}
+            <div className="absolute top-3.5 left-0 right-0 h-1 bg-gray-200 z-0 rounded-full" />
+            <div 
+              className="absolute top-3.5 left-0 h-1 bg-green-600 z-0 rounded-full transition-all duration-500" 
+              style={{ width: isPaidConfirmed ? '100%' : isNotified ? '50%' : '0%' }}
+            />
+
+            {/* Step 1: Base Allocation initialized */}
+            <div className="relative z-10 flex flex-col items-center space-y-1">
+              <div className="w-8 h-8 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center shadow-sm">✓</div>
+              <span className="text-[11px] font-medium text-gray-600">Generated</span>
             </div>
 
-            {feedback && (
-              <div className="p-4 bg-red-50 text-red-600 border border-red-200 text-xs font-medium rounded-2xl text-left">
-                {feedback}
+            {/* Step 2: Customer Flags Funds Dispatched */}
+            <div className="relative z-10 flex flex-col items-center space-y-1">
+              <div className={`w-8 h-8 rounded-full text-xs font-bold flex items-center justify-center transition-colors duration-300 shadow-sm ${isNotified ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-400'}`}>
+                {isPaidConfirmed ? '✓' : '2'}
+              </div>
+              <span className={`text-[11px] font-medium ${isNotified ? 'text-gray-600' : 'text-gray-400'}`}>Transfer Sent</span>
+            </div>
+
+            {/* Step 3: Vendor Signs Off Ledger Clearance */}
+            <div className="relative z-10 flex flex-col items-center space-y-1">
+              <div className={`w-8 h-8 rounded-full text-xs font-bold flex items-center justify-center transition-colors duration-300 shadow-sm ${isPaidConfirmed ? 'bg-green-600 text-white' : 'bg-gray-200 text-gray-400'}`}>
+                {isPaidConfirmed ? '✓' : '3'}
+              </div>
+              <span className={`text-[11px] font-medium ${isPaidConfirmed ? 'text-gray-600' : 'text-gray-400'}`}>Confirmed</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Banking Node Route Parameters Breakdown */}
+        {!isPaidConfirmed && (
+          <div className="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-gray-200 p-5 sm:p-6 space-y-4">
+            <h3 className="font-semibold text-sm sm:text-base border-b border-gray-100 pb-2">Manual Bank Settlement Instructions</h3>
+            <p className="text-xs sm:text-sm text-gray-500 leading-relaxed">
+              Please complete a direct bank transfer for the exact amount below to the vendor account credentials listed here:
+            </p>
+            
+            <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 space-y-3 text-sm">
+              <div className="flex justify-between"><span className="text-gray-500">Bank Institution:</span><span className="font-semibold">{order.bankName}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Beneficiary Name:</span><span className="font-semibold">{order.accountName}</span></div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-500">Account Number:</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold tracking-wider">{order.accountNumber}</span>
+                  <button 
+                    type="button" 
+                    onClick={handleCopyAccount}
+                    className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors ${copied ? 'bg-green-100 text-green-700' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'}`}
+                  >
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {currentStatus === 'pending' ? (
+              <button
+                type="button"
+                onClick={handleIHavePaid}
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-4 rounded-xl sm:rounded-2xl transition-colors text-sm sm:text-base"
+              >
+                I Have Made This Transfer
+              </button>
+            ) : (
+              <div className="w-full bg-amber-50 border border-amber-200 text-amber-800 text-xs sm:text-sm font-medium p-4 rounded-xl sm:rounded-2xl text-center">
+                ⏳ Merchant has been notified. Awaiting validation loop confirmation...
               </div>
             )}
-
-            <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 text-left space-y-3">
-              <div>
-                <span className="text-xs font-semibold uppercase text-gray-400 block tracking-wider">Settlement Target Amount</span>
-                <span className="text-2xl font-bold text-green-600">₦{order.total.toLocaleString()}</span>
-              </div>
-              <hr className="border-gray-200" />
-              <div className="text-sm space-y-1">
-                <p><span className="text-gray-500">Receiving Bank:</span> {order.bankName}</p>
-                <p><span className="text-gray-500">Account Number:</span> {order.accountNumber}</p>
-                <p><span className="text-gray-500">Account Name:</span> {order.accountName}</p>
-              </div>
-            </div>
-
-            <div className="bg-white border border-gray-200 rounded-2xl p-4 text-left text-sm space-y-2">
-              {order.items.map((item) => (
-                <div key={item.id} className="flex justify-between gap-4">
-                  <span>{item.name} x{item.qty}</span>
-                  <span className="whitespace-nowrap">₦{(item.price * item.qty).toLocaleString()}</span>
-                </div>
-              ))}
-              <div className="border-t border-gray-100 pt-2 flex justify-between text-gray-500">
-                <span>VAT</span>
-                <span>₦{order.vat.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between text-gray-500">
-                <span>Delivery</span>
-                <span>₦{order.delivery.toLocaleString()}</span>
-              </div>
-            </div>
-
-            {/* Validation Check Trigger */}
-            <form onSubmit={handleNotifyMerchant} className="space-y-4 text-left">
-              <label className="flex items-start gap-3 cursor-pointer text-sm text-black select-none">
-                <input 
-                  type="checkbox" 
-                  checked={userChecked}
-                  onChange={(e) => { setUserChecked(e.target.checked); setFeedback(null); }}
-                  className="w-5 h-5 accent-green-600 rounded border-gray-300 mt-0.5 flex-shrink-0 cursor-pointer" 
-                />
-                <span>I confirm that I have transferred exactly ₦{order.total.toLocaleString()} from my banking app into the target account detailed above.</span>
-              </label>
-
-              <button type="submit" disabled={notifying} className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white font-semibold py-4 rounded-2xl transition-colors text-center text-md">
-                {notifying ? 'Notifying Merchant Streams...' : 'I Have Transferred Payment'}
-              </button>
-            </form>
-          </>
-        ) : (
-          <>
-            {/* COMPLETED SUCCESS STATE */}
-            <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-green-600 text-2xl font-bold">
-              ✓
-            </div>
-            <div>
-              <h1 className="text-2xl font-semibold text-black">Payment Confirmed</h1>
-              <p className="text-gray-500 text-sm mt-2">Your manual transfer receipt has been verified and processed successfully.</p>
-            </div>
-            <div className="bg-green-50/50 border border-green-200 rounded-2xl p-4 text-sm text-green-800 text-left">
-              Receipt reference token generated. Your products are packing for shipment fulfillment updates.
-            </div>
-            <button 
-              type="button" 
-              onClick={() => router.push('/')}
-              className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-4 rounded-2xl transition-colors"
-            >
-              Return to Landing Channel
-            </button>
-          </>
+          </div>
         )}
+
+        {/* Invoice Item Breakdown Manifest */}
+        <div className="bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-gray-200 p-5 sm:p-6 space-y-4">
+          <h3 className="font-semibold text-sm sm:text-base border-b border-gray-100 pb-2">Order Summary</h3>
+          
+          <div className="space-y-3 text-xs sm:text-sm max-h-40 overflow-y-auto pr-1">
+            {order.items.map((item, index) => (
+              <div key={index} className="flex justify-between items-start gap-4">
+                <div className="min-w-0">
+                  <p className="font-medium text-black truncate">{item.name}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Qty: {item.qty} units</p>
+                </div>
+                <span className="font-medium text-gray-700 flex-shrink-0">₦{(item.price * item.qty).toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-gray-50 p-4 rounded-xl text-xs space-y-2 border border-gray-100 pt-3">
+            <div className="flex justify-between text-gray-500"><span>Items Subtotal</span><span>₦{order.subtotal.toLocaleString()}</span></div>
+            <div className="flex justify-between text-gray-500"><span>VAT Settlement</span><span>+ ₦{order.vat.toLocaleString()}</span></div>
+            <div className="flex justify-between text-gray-500"><span>Logistics Fee</span><span>+ ₦{order.delivery.toLocaleString()}</span></div>
+            <div className="flex justify-between text-sm font-bold border-t border-gray-200 pt-2 text-black">
+              <span>Grand Total</span>
+              <span className="text-green-600">₦{order.total.toLocaleString()}</span>
+            </div>
+          </div>
+
+          {isPaidConfirmed && (
+            <div className="space-y-3 pt-2">
+              <div className="bg-green-50 border border-green-200 text-green-800 font-medium p-4 rounded-xl sm:rounded-2xl text-center text-sm">
+                ✓ Payment Verified! Your storefront order has cleared processing successfully.
+              </div>
+              <button
+                type="button"
+                onClick={() => router.push('/')}
+                className="w-full bg-gray-900 hover:bg-black text-white font-medium py-4 rounded-xl sm:rounded-2xl transition-colors text-sm"
+              >
+                Return to Storefront Home
+              </button>
+            </div>
+          )}
+        </div>
 
       </div>
     </div>
